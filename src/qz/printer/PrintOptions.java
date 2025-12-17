@@ -327,10 +327,10 @@ public class PrintOptions {
             try { psOptions.rotation = configOpts.getDouble("rotation"); }
             catch(JSONException e) { LoggerUtilities.optionWarn(log, "double", "rotation", configOpts.opt("rotation")); }
         }
-        if (!configOpts.isNull("scaleContent")) {
-            try { psOptions.scaleContent = configOpts.getBoolean("scaleContent"); }
-            catch(JSONException e) { LoggerUtilities.optionWarn(log, "boolean", "scaleContent", configOpts.opt("scaleContent")); }
-        }
+        //if (!configOpts.isNull("scaleContent")) {
+        //    try { psOptions.scaleContent = configOpts.getBoolean("scaleContent"); }
+        //    catch(JSONException e) { LoggerUtilities.optionWarn(log, "boolean", "scaleContent", configOpts.opt("scaleContent")); }
+        //}
         if (!configOpts.isNull("size")) {
             Size s = new Size();
             JSONObject subSize = configOpts.optJSONObject("size");
@@ -475,7 +475,8 @@ public class PrintOptions {
         private String printerTray = null;                                          //Printer tray to use
         private boolean rasterize = true;                                           //Whether documents are rasterized before printing
         private double rotation = 0;                                                //Image rotation
-        private boolean scaleContent = true;                                        //Adjust paper size for best image fit
+        //private boolean scaleContent = true;                                        //Adjust paper size for best image fit
+        private boolean scaleContent = false;                                        //Adjust paper size for best image fit (default: true)
         private Size size = null;                                                   //Paper size
         private Unit units = Unit.INCH;                                             //Units for density, margins, size
 
