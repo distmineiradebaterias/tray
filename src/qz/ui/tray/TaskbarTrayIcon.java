@@ -111,16 +111,53 @@ public class TaskbarTrayIcon extends JFrame implements WindowListener {
 
     @Override
     public void windowDeiconified(WindowEvent e) {
-        Point p = MouseInfo.getPointerInfo().getLocation();
-        setLocation(p);
-        // call show against parent to prevent un-clickable state
-        popup.show(this, 0, 0);
-
-        // move to mouse cursor; adjusting for screen boundaries
-        Point before = popup.getLocationOnScreen();
-        Point after = new Point();
-        after.setLocation(before.x < p.x? p.x - popup.getWidth():p.x, before.y < p.y? p.y - popup.getHeight():p.y);
-        popup.setLocation(after);
+        PointerInfo pointerInfo = MouseInfo.getPointerInfo();
+        if (pointerInfo == null) {
+            // Fallback: show at the invoker origin
+            popup.show(this, 0, 0);
+            return;
+        }
+    
+        Point mouse = pointerInfo.getLocation();
+    
+        // Determine which screen the mouse is on
+        Rectangle screenBounds = null;
+        GraphicsDevice[] devices = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices();
+        for (GraphicsDevice device : devices) {
+            GraphicsConfiguration config = device.getDefaultConfiguration();
+            Rectangle bounds = config.getBounds();
+            if (bounds.contains(mouse)) {
+                screenBounds = bounds;
+                break;
+            }
+        }
+        if (screenBounds == null) {
+            screenBounds = getGraphicsConfiguration().getBounds();
+        }
+    
+        // Anchor this invisible frame at the top-left of the current screen so popup coordinates stay stable
+        setLocation(screenBounds.x, screenBounds.y);
+    
+        // Calculate popup position near the click (cursor)
+        Dimension popupSize = popup.getPreferredSize();
+    
+        int x = mouse.x + 1; // slight offset so the cursor isn't exactly on the border
+        int y = mouse.y + 1;
+    
+        // If it would overflow right, shift left
+        int maxX = screenBounds.x + screenBounds.width - popupSize.width;
+        if (x > maxX) x = maxX;
+    
+        // If it would overflow bottom, open above the cursor instead
+        int maxY = screenBounds.y + screenBounds.height - popupSize.height;
+        if (y > maxY) y = mouse.y - popupSize.height - 1;
+    
+        // Clamp top/left
+        if (x < screenBounds.x) x = screenBounds.x;
+        if (y < screenBounds.y) y = screenBounds.y;
+    
+        // Show relative to the anchored frame
+        popup.show(this, x - screenBounds.x, y - screenBounds.y);
     }
 
     @Override
