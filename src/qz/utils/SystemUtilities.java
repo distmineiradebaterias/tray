@@ -802,6 +802,17 @@ public class SystemUtilities {
                 case MAC:
                     break;
                 case LINUX:
+                    // KDE Plasma: Java AWT SystemTray/TrayIcon may show the icon but ignore mouse events (no context menu).
+                    // Force QZ's fallback tray behavior on KDE/Plasma for reliability (both X11 and Wayland).
+                    final String desktopEnvSignature = (
+                            (System.getenv("XDG_CURRENT_DESKTOP") == null ? "" : System.getenv("XDG_CURRENT_DESKTOP")) + " " +
+                            (System.getenv("DESKTOP_SESSION") == null ? "" : System.getenv("DESKTOP_SESSION")) + " " +
+                            (System.getenv("KDE_FULL_SESSION") == null ? "" : System.getenv("KDE_FULL_SESSION"))
+                    ).toLowerCase(java.util.Locale.ROOT);
+                
+                    if (desktopEnvSignature.contains("kde") || desktopEnvSignature.contains("plasma")) {
+                        return false;
+                    }
                     break;
                 default:
                     return false;
