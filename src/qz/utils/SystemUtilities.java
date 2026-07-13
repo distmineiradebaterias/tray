@@ -814,6 +814,8 @@ public class SystemUtilities {
                     break;
                 case MAC:
                     break;
+                case LINUX:
+                    break;
                 default:
                     // Linux System Tray support is abysmal, always use TaskbarTrayIcon
                     return false;
