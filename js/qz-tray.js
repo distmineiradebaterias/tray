@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * @version 2.2.6
+ * @version 2.3.1-SNAPSHOT
  * @overview QZ Tray Connector
  * @license LGPL-2.1-only
  * <p/>
@@ -53,7 +53,7 @@ var qz = (function() {
 
     var _qz = {
         TITLE: "QZ Tray",
-        VERSION: "2.2.6",                              //must match @version above
+        VERSION: "2.3.1-SNAPSHOT",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -133,13 +133,13 @@ var qz = (function() {
                     _qz.log.trace("Attempting connection", address);
                     var wsPromise;
                     if (lna) {
-                        _qz.log.trace("Connecting with lna.js");
+                        _qz.log.trace("Connecting with qz-lna");
                         wsPromise = lna.detectLna(address, _qz.websocket.setup.webSocketPromise, {
                             isWebSocket: true,
                             defaultAddressSpace: 'public'
                         });
                     } else {
-                        _qz.log.trace("Connecting without lna.js");
+                        _qz.log.trace("Connecting without qz-lna");
                         wsPromise = _qz.websocket.setup.webSocketPromise(address);
                     }
                     return wsPromise.catch(function(evt) {
@@ -754,9 +754,9 @@ var qz = (function() {
                 // Use `require` if available so that bundlers can detect the dependency
                 if (typeof require === 'function') {
                     try {
-                        return require('lna');
+                        return require('qz-lna');
                     } catch (e) {
-                        _qz.log.warn("Unable to load LNA library", e);
+                        _qz.log.allay("Unable to load LNA library", e);
                     }
                 }
             },
@@ -840,6 +840,7 @@ var qz = (function() {
                     if (!source) { continue; }
 
                     for(var key in source) {
+                        if (key === '__proto__' || key === 'constructor' || key === 'prototype') { continue; }
                         if (source.hasOwnProperty(key)) {
                             if (target === source[key]) { continue; }
 
@@ -1028,6 +1029,11 @@ var qz = (function() {
                             delete config.spool.end;
                         }
                         delete config.spool;
+                    }
+                }
+                if(_qz.tools.versionCompare(2, 3, 0, 4) < 0) {
+                    if(config.encoding && config.encoding.toUpperCase() === 'LEGACY') {
+                        config.encoding = null;
                     }
                 }
                 return config;
@@ -2899,12 +2905,14 @@ var qz = (function() {
             /**
              * Get version of connected QZ Tray application.
              *
+             * @param {Object} [options] Version options
+             *  @param {boolean} [options.details=false] Returns additional details such as <code>title</code>, <code>vendor</code>, <code>url</code> and <code>email</code>.
              * @returns {Promise<string|Error>} Version number of QZ Tray.
              *
              * @memberof qz.api
              */
-            getVersion: function() {
-                return _qz.websocket.dataPromise('getVersion');
+            getVersion: function(options) {
+                return _qz.websocket.dataPromise('getVersion', options);
             },
 
             /**

@@ -3,13 +3,16 @@ package qz.printer.action;
 import com.github.zafarkhaja.semver.Version;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.io.IOUtils;
+import org.apache.pdfbox.io.RandomAccessReadBuffer;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.printing.Scaling;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.codehaus.jettison.json.JSONArray;
@@ -158,14 +161,26 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
     }
 
     public static PDDocument loadPdf(String data, PrintingUtilities.Flavor flavor) throws IOException {
-        switch(flavor) {
-            case PLAIN:
-                // There's really no such thing as a 'PLAIN' PDF, assume it's a URL
-            case FILE:
-                return PDDocument.load(ConnectionUtilities.getInputStream(data, true));
-            default:
-                return PDDocument.load(new ByteArrayInputStream(flavor.read(data)));
+        return switch(flavor) {
+            // There's really no such thing as a 'PLAIN' PDF, assume it's a URL
+            case PLAIN, FILE -> refreshAcroForm(Loader.loadPDF(new RandomAccessReadBuffer(ConnectionUtilities.getInputStream(data, true))));
+            default -> refreshAcroForm(Loader.loadPDF(new RandomAccessReadBuffer(new ByteArrayInputStream(flavor.read(data)))));
+        };
+    }
+
+    /**
+     * Show annotations by forcing the refresh of acro forms per #1481
+     */
+    private static PDDocument refreshAcroForm(PDDocument doc) {
+        PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+        if(acroForm != null && acroForm.getNeedAppearances()) {
+            try {
+                acroForm.refreshAppearances();
+            } catch(IOException e) {
+                log.warn("Unable to refresh acro form", e);
+            }
         }
+        return doc;
     }
 
     /**

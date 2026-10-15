@@ -10,6 +10,8 @@
 
 package qz.utils;
 
+import com.formdev.flatlaf.FlatDarculaLaf;
+import com.formdev.flatlaf.FlatIntelliJLaf;
 import com.github.zafarkhaja.semver.ParseException;
 import com.github.zafarkhaja.semver.Version;
 import org.apache.commons.lang3.StringUtils;
@@ -18,17 +20,18 @@ import org.joor.Reflect;
 import org.joor.ReflectException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import qz.App;
 import qz.build.provision.params.Arch;
 import qz.build.provision.params.Os;
 import qz.common.Constants;
 import qz.installer.Installer;
+import qz.utils.linux.LinuxUtilities;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.geom.Area;
 import java.io.File;
 import java.io.UnsupportedEncodingException;
-import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -41,7 +44,6 @@ import java.nio.file.Paths;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -70,6 +72,7 @@ public class SystemUtilities {
 
     private static Boolean darkDesktop;
     private static Boolean darkTaskbar;
+    @Deprecated
     private static Boolean hasMonocle;
     private static String classProtocol;
     private static Version osVersion;
@@ -153,19 +156,11 @@ public class SystemUtilities {
      */
     public static String getOsDisplayVersion() {
         if (osDisplayVersion == null) {
-            switch(OS_TYPE) {
-                case WINDOWS:
-                    osDisplayVersion = WindowsUtilities.getOsDisplayVersion();
-                    break;
-                case MAC:
-                    osDisplayVersion = MacUtilities.getOsDisplayVersion();
-                    break;
-                case LINUX:
-                    osDisplayVersion = UnixUtilities.getOsDisplayVersion();
-                    break;
-                default:
-                    osDisplayVersion = System.getProperty("os.version", "0.0.0");
-            }
+            osDisplayVersion = switch(OS_TYPE) {
+                case WINDOWS -> WindowsUtilities.getOsDisplayVersion();
+                case MAC -> MacUtilities.getOsDisplayVersion();
+                default -> LinuxUtilities.getOsDisplayVersion();
+            };
         }
         return osDisplayVersion;
     }
@@ -175,14 +170,10 @@ public class SystemUtilities {
      */
     public static String getOsDisplayName() {
         if(osName == null) {
-            switch(OS_TYPE) {
-                case LINUX:
-                    // "Linux" is too generic, get the flavor (e.g. Ubuntu, Fedora)
-                    osName = UnixUtilities.getOsDisplayName();
-                    break;
-                default:
-                    osName = System.getProperty("os.name", "Unknown");
-            }
+            osName = switch(OS_TYPE) {
+                case WINDOWS, MAC -> System.getProperty("os.name", "Unknown");
+                default -> LinuxUtilities.getDisplayName();
+            };
         }
         return osName;
     }
@@ -207,32 +198,9 @@ public class SystemUtilities {
 
     public static int getProcessId() {
         if(pid == null) {
-            // Try Java 9+
-            if(Constants.JAVA_VERSION.majorVersion() >= 9) {
-                pid = getProcessIdJigsaw();
-            }
-            // Try JNA
-            if(pid == null || pid == -1) {
-                pid = SystemUtilities.isWindows() ? WindowsUtilities.getProcessId() : UnixUtilities.getProcessId();
-            }
+            pid = (int)ProcessHandle.current().pid();
         }
         return pid;
-    }
-
-    private static int getProcessIdJigsaw() {
-        try {
-            Class processHandle = Class.forName("java.lang.ProcessHandle");
-            Method current = processHandle.getDeclaredMethod("current");
-            Method pid = processHandle.getDeclaredMethod("pid");
-            Object processHandleInstance = current.invoke(processHandle);
-            Object pidValue = pid.invoke(processHandleInstance);
-            if(pidValue instanceof Long) {
-                return ((Long)pidValue).intValue();
-            }
-        } catch(Throwable t) {
-            log.warn("Could not get process ID using Java 9+, will attempt to fallback to JNA", t);
-        }
-        return -1;
     }
 
     /**
@@ -346,19 +314,20 @@ public class SystemUtilities {
         return isDarkTaskbar(false);
     }
 
+    /**
+     * Handle nuances of a taskbar that's themed differently than the rest of the desktop
+     * which is mostly a Windows-ism.  macOS and Linux both provide ways to use template
+     * icons/mask icons for the taskbar.
+     */
     public static boolean isDarkTaskbar(boolean recheck) {
         if(darkTaskbar == null || recheck) {
-            if (isWindows()) {
-                darkTaskbar = WindowsUtilities.isDarkTaskbar();
-            } else if(isMac()) {
-                // Ignore, we'll set the template flag using JNA
-                darkTaskbar = false;
-            } else {
-                // Linux doesn't differentiate; return the cached darkDesktop value
-                darkTaskbar = isDarkDesktop();
-            }
+            darkTaskbar = switch(OS_TYPE) {
+                case WINDOWS -> WindowsUtilities.isDarkTaskbar();
+                case MAC -> false; // ignore, we'll use template icons
+                default ->  isDarkDesktop(); // re-use desktop value TODO: revisit after #1456
+            };
         }
-        return darkTaskbar.booleanValue();
+        return darkTaskbar;
     }
 
     public static boolean isDarkDesktop() {
@@ -367,16 +336,13 @@ public class SystemUtilities {
 
     public static boolean isDarkDesktop(boolean recheck) {
         if (darkDesktop == null || recheck) {
-            // Check for Dark Mode on MacOS
-            if (isMac()) {
-                darkDesktop = MacUtilities.isDarkDesktop();
-            } else if (isWindows()) {
-                darkDesktop = WindowsUtilities.isDarkDesktop();
-            } else {
-                darkDesktop = UnixUtilities.isDarkMode();
-            }
+            darkDesktop = switch(OS_TYPE) {
+                case MAC -> MacUtilities.isDarkDesktop();
+                case WINDOWS -> WindowsUtilities.isDarkDesktop();
+                default ->  LinuxUtilities.isDarkDesktop();
+            };
         }
-        return darkDesktop.booleanValue();
+        return darkDesktop;
     }
 
     public static void adjustThemeColors() {
@@ -384,33 +350,25 @@ public class SystemUtilities {
         Constants.TRUSTED_COLOR = isDarkDesktop() ? Constants.TRUSTED_COLOR_DARK : Constants.TRUSTED_COLOR_LITE;
     }
 
-    public static boolean prefersMaskTrayIcon() {
-        if (Constants.MASK_TRAY_SUPPORTED) {
-            if (SystemUtilities.isMac()) {
-                // Assume a pid of -1 is a broken JNA
-                return getProcessId() != -1;
-            } else if (SystemUtilities.isWindows() && SystemUtilities.getOsVersion().getMajorVersion() >= 10) {
-                return true;
-            }
+    private static String calculateLaf() {
+        // Use Darcula l&F for all OSs
+        if(isDarkDesktop()) {
+            return FlatDarculaLaf.class.getCanonicalName();
         }
-        return false;
+        // Use system l&f for everything except linux/unix
+        return switch(OS_TYPE) {
+            case WINDOWS, MAC -> UIManager.getSystemLookAndFeelClassName();
+            default -> FlatIntelliJLaf.class.getCanonicalName();
+        };
     }
 
-    public static boolean setSystemLookAndFeel(boolean headless) {
-        if(headless) {
+    public static boolean setSystemLookAndFeel() {
+        if(App.isHeadless()) {
             return false;
         }
         try {
             UIManager.getDefaults().put("Button.showMnemonics", Boolean.TRUE);
-            boolean darculaThemeNeeded = true;
-            if(!isMac() && (isUnix() && UnixUtilities.isDarkMode())) {
-                darculaThemeNeeded = false;
-            }
-            if(isDarkDesktop() && darculaThemeNeeded) {
-                UIManager.setLookAndFeel("com.bulenkov.darcula.DarculaLaf");
-            } else {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            }
+            UIManager.setLookAndFeel(calculateLaf());
             adjustThemeColors();
             return true;
         } catch (Throwable t) {
@@ -424,7 +382,6 @@ public class SystemUtilities {
      * Useful for tracking a browser window on multiple-monitor setups
      * @param dialog A dialog whom's width and height are used for calculating center-fit position
      * @param position The center point of a screen as calculated from a web browser at 96-dpi
-     * @return <code>true</code> if the operation is successful
      */
     public static void centerDialog(Dialog dialog, Point position) {
         // Assume 0,0 are bad coordinates
@@ -434,15 +391,7 @@ public class SystemUtilities {
             return;
         }
 
-        //adjust for dpi scaling
-        double dpiScale = getWindowScaleFactor(true);
-        if (dpiScale == 0) {
-            log.debug("Invalid window scale value: {}, we'll center on the primary monitor instead", dpiScale);
-            dialog.setLocationRelativeTo(null);
-            return;
-        }
-
-        Rectangle rect = new Rectangle((int)(position.x * dpiScale), (int)(position.y * dpiScale), dialog.getWidth(), dialog.getHeight());
+        Rectangle rect = new Rectangle(position.x, position.y, dialog.getWidth(), dialog.getHeight());
         rect.translate(-dialog.getWidth() / 2, -dialog.getHeight() / 2);
         Point p = new Point((int)rect.getCenterX(), (int)rect.getCenterY());
         log.debug("Calculated dialog centered at: {}", p);
@@ -472,66 +421,6 @@ public class SystemUtilities {
             }
         }
         return area.contains(window);
-    }
-
-    /**
-     * Shim for detecting window screen-placement scaling
-     * See issues #284, #448
-     * @return Logical dpi scale as dpi/96
-     */
-    private static double getWindowScaleFactor(boolean forceRefresh) {
-        if(windowScaleFactor == -1 || forceRefresh) {
-            // MacOS is always 1
-            if (isMac()) {
-                return windowScaleFactor = 1;
-            }
-            // Windows/Linux on JDK8 honors scaling
-            if (Constants.JAVA_VERSION.lessThan(Version.valueOf("11.0.0"))) {
-                return windowScaleFactor = Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
-            }
-            // Windows on JDK11 is always 1
-            if (isWindows()) {
-                return windowScaleFactor = 1;
-            }
-            // Linux/Unix on JDK11 requires JNA calls to Gdk
-            return windowScaleFactor = UnixUtilities.getScaleFactor();
-        }
-        return windowScaleFactor;
-    }
-
-    public static double getWindowScaleFactor() {
-        return getWindowScaleFactor(false);
-    }
-
-    public static Dimension scaleWindowDimension(Dimension orig) {
-        return scaleWindowDimension(orig.getWidth(), orig.getHeight());
-    }
-
-    public static Dimension scaleWindowDimension(double width, double height) {
-        double scaleFactor = getWindowScaleFactor();
-        return new Dimension(
-                (int)(width * scaleFactor),
-                (int)(height * scaleFactor)
-        );
-    }
-
-    /**
-     * Detects if HiDPI is enabled
-     * Warning: Due to behavioral differences between OSs, JDKs and poor
-     * detection techniques this function should only be used to fix rare
-     * edge-case bugs.
-     *
-     * See also SystemUtilities.getWindowScaleFactor()
-     * @return true if HiDPI is detected
-     */
-    public static boolean isHiDPI() {
-        if(isMac()) {
-            return MacUtilities.getScaleFactor() > 1;
-        } else if(isWindows()) {
-            return WindowsUtilities.getScaleFactor() > 1;
-        }
-        // Fallback to a JNA Gdk technique
-        return UnixUtilities.getScaleFactor() > 1;
     }
 
     /**
@@ -632,6 +521,7 @@ public class SystemUtilities {
         return false;
     }
 
+    @Deprecated
     public static boolean hasMonocle() {
         if(hasMonocle == null) {
             try {
@@ -804,8 +694,8 @@ public class SystemUtilities {
     /**
      * Cross-platform SystemTray detector
      */
-    public static boolean isSystemTraySupported(boolean headless) {
-        if(!headless) {
+    public static boolean isSystemTraySupported() {
+        if(!App.isHeadless()) {
             switch(getOs()) {
                 case WINDOWS:
                     if(WindowsUtilities.isHiddenSystemTray()) {

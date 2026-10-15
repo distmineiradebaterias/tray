@@ -28,6 +28,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import qz.common.Constants;
+import qz.utils.linux.LinuxUtilities;
 
 import javax.net.ssl.*;
 
@@ -79,7 +80,8 @@ public final class ConnectionUtilities {
             }
         }
         // Allow exception for file: demo/assets
-        if(urlProtocol.trim().toLowerCase(Locale.ENGLISH).equals("file")) {
+        if(PrefsSearch.getBoolean(ArgValue.SECURITY_PRINT_DEMOASSETS) &&
+                urlProtocol.trim().toLowerCase(Locale.ENGLISH).equals("file")) {
             try {
                 // Sanitize manipulative URLs
                 url = Paths.get(url.toURI()).normalize().toUri().toURL();
@@ -240,16 +242,18 @@ public final class ConnectionUtilities {
             if (!GraphicsEnvironment.isHeadless() && parts != null && parts.length > 2) {
                 linuxOS = parts[2];
             }
-            if (UnixUtilities.isUbuntu()) {
+            if (LinuxUtilities.isUbuntu()) {
                 linuxOS += (linuxOS.isEmpty() ? "" : "; ") + "Ubuntu";
-            } else if(UnixUtilities.isFedora()) {
+            } else if(LinuxUtilities.isFedora()) {
                 linuxOS += (linuxOS.isEmpty()? "" : "; ") + "Fedora";
-            } else if(UnixUtilities.isDebian()) {
+            } else if(LinuxUtilities.isDebian()) {
                 linuxOS += (linuxOS.isEmpty() ? "" : "; ") + "Debian";
+            } else if(LinuxUtilities.isArch()) {
+                linuxOS += (linuxOS.isEmpty() ? "" : "; ") + "Arch";
             }
             return linuxOS;
         }
-        return System.getProperty("os.name");
+        return SystemUtilities.OS_NAME;
     }
 
     private static String getPlatformVersion() {

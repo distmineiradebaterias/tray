@@ -103,13 +103,24 @@
             <arg value="${out.dir}/distribution.xml"/>
         </exec>
 
+        <!-- Escape ampersand in project name -->
+        <loadresource property="project.name.escaped">
+            <string value="${project.name}"/>
+            <filterchain>
+                <tokenfilter>
+                    <replacestring from="&amp;" to="&amp;amp;"/>
+                </tokenfilter>
+            </filterchain>
+        </loadresource>
+        <property name="project.name.escaped" value="${project.name}" description="fallback value"/>
+
         <!-- Inject title, background -->
         <replace file="${out.dir}/distribution.xml" token="&lt;options customize">
             <replacevalue><![CDATA[<title>@project.name@ @build.version@</title>
 	<background file="background.tiff" mime-type="image/tiff" alignment="bottomleft" scaling="none"/>
 	<background-darkAqua file="background.tiff" mime-type="image/tiff" alignment="bottomleft" scaling="none"/>
 	<options customize]]></replacevalue>
-            <replacefilter token="@project.name@" value="${project.name}"/>
+            <replacefilter token="@project.name@" value="${project.name.escaped}"/>
             <replacefilter token="@build.version@" value="${build.version}"/>
         </replace>
 
@@ -245,6 +256,18 @@
             <filterchain><expandproperties/></filterchain>
         </copy>
 
+        <!-- Convert nfc-encoded filenames to nfd-encoded per #1511 -->
+        <exec executable="convmv" failifexecutionfails="false">
+            <arg value="-r"/>
+            <arg value="-f"/>
+            <arg value="utf-8"/>
+            <arg value="-t"/>
+            <arg value="utf-8"/>
+            <arg value="--nfd"/>
+            <arg value="${bundle.dir}"/>
+            <arg value="--notest"/>
+        </exec>
+
         <!-- use xargs to loop over and codesign all files-->
         <echo level="info" message="Signing ${bundle.dir} using ${codesign.activeid}"/>
         <!-- Find -X fails on spaces but doesn't failonerror, this may lead to overlooked errors. -->
@@ -306,6 +329,11 @@
             <arg value="-Z"/>
             <arg value="F7F10838412D9187042EE1EB018794094AFA189A"/>
         </exec>
+        <exec executable="security">
+            <arg value="delete-certificate"/>
+            <arg value="-Z"/>
+            <arg value="A9A79C6DB1C29CAD05F61F1384360AF2CEED4230"/>
+        </exec>
 
         <exec executable="security">
             <arg value="add-certificates"/>
@@ -325,10 +353,13 @@
                     <include name="**/darwin-x86-64/*" if="target.arch.x86_64"/> <!-- jna/hid4java -->
                     <include name="**/osx-x86_64/*" if="target.arch.x86_64"/> <!-- usb4java -->
                     <include name="**/osx_64/*" if="target.arch.x86_64"/> <!-- jssc -->
+                    <include name="**/natives/*-x86_64.dylib" if="target.arch.x86_64"/> <!-- flatlaf -->
                     <!--aarch64-->
-                    <include name="**/darwin-aarch64/*" if="target.arch.aarch64"/> <!-- jna/hid4java -->
-                    <include name="**/osx-aarch64/*" if="target.arch.aarch64"/> <!-- usb4java -->
+                    <include name="**/darwin-aarch64/*" if="target.arch.aarch64"/> <!-- jna/hid4java, usb4java -->
                     <include name="**/osx_arm64/*" if="target.arch.aarch64"/> <!-- jssc -->
+                    <include name="**/natives/*-arm64.dylib" if="target.arch.aarch64"/> <!-- flatlaf -->
+                    <!--all-->
+                    <include name="*.dylib"/> <!-- javafx -->
                 </fileset>
         </copy>
     </target>

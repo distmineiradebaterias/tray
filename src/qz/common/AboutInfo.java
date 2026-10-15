@@ -56,14 +56,15 @@ public class AboutInfo {
         return about;
     }
 
-    private static JSONObject product() throws JSONException {
+    public static JSONObject product() throws JSONException {
         JSONObject product = new JSONObject();
 
         product
                 .put("title", Constants.ABOUT_TITLE)
                 .put("version", Constants.VERSION)
                 .put("vendor", Constants.ABOUT_COMPANY)
-                .put("url", Constants.ABOUT_URL);
+                .put("url", Constants.ABOUT_URL)
+                .put("email", Constants.ABOUT_EMAIL);
 
         return product;
     }
@@ -100,6 +101,7 @@ public class AboutInfo {
                 .put("java", String.format("%s (%s)", Constants.JAVA_VERSION, SystemUtilities.getArch().toString().toLowerCase()))
                 .put("java (location)", System.getProperty("java.home"))
                 .put("java (vendor)", Constants.JAVA_VENDOR)
+                .put("java (pid)", SystemUtilities.getProcessId())
                 .put("uptime", DurationFormatUtils.formatDurationWords(uptime, true, false))
                 .put("uptimeMillis", uptime)
                 .put("sandbox", SystemUtilities.isMac() && MacUtilities.isSandboxed());

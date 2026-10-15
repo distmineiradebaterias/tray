@@ -3,16 +3,18 @@ package qz.installer;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import qz.utils.FileUtilities;
-import qz.utils.ShellUtilities;
-import qz.utils.SystemUtilities;
-import qz.utils.UnixUtilities;
+import qz.App;
+import qz.utils.*;
+import qz.utils.linux.LinuxUtilities;
 
+import javax.swing.*;
+import java.awt.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import static qz.common.Constants.*;
@@ -63,7 +65,8 @@ public class LinuxInstaller extends Installer {
         fieldMap.put("%DESTINATION%", destination);
         fieldMap.put("%LINUX_ICON%", String.format("%s.svg", PROPS_FILE));
         fieldMap.put("%COMMAND%", String.format("%s/%s", destination, PROPS_FILE));
-        fieldMap.put("%PARAM%", isStartup ? "--honorautostart" : "%u");
+        fieldMap.put("%WM_CLASS%", getWmClass());
+        fieldMap.put("%PARAM%", isStartup ? ArgValue.AUTOSTART.getMatch() : "%u");
 
         File launcher = new File(location);
         try {
@@ -104,8 +107,11 @@ public class LinuxInstaller extends Installer {
     }
 
     public Installer addSystemSettings() {
+        LinuxInstaller.findBinary("/usr/bin/lpr", "Most printing jobs will fail.",
+                                  "cups-bsd", "cups-client", "cups");
+
         // Legacy Ubuntu versions only: Patch Unity to show the System Tray
-        if(UnixUtilities.isUbuntu()) {
+        if(LinuxUtilities.isUbuntu()) {
             ShellUtilities.execute("gsettings", "set", "com.canonical.Unity.Panel", "systray", "-whitelist", "\"['all']\"");
 
             if(ShellUtilities.execute("killall", "-w", "unity", "-panel")) {
@@ -188,6 +194,13 @@ public class LinuxInstaller extends Installer {
         // Spawn
         log.info("Executing: {}", Arrays.toString(argsList.toArray()));
         super.startProcess(argsList);
+    }
+
+    /**
+     * Get the value for Desktop file's StartupWMClass to fix Linux taskbar icon
+     */
+    private static String getWmClass() {
+        return App.class.getCanonicalName().replace(".", "-");
     }
 
     /**
@@ -350,6 +363,37 @@ public class LinuxInstaller extends Installer {
             }
         }
         return env;
+    }
+
+    private static boolean promptInstall(String binary) {
+        if (Installer.IS_SILENT || GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        try {
+            LinuxUtilities.setJavaScaleFactor();
+            SystemUtilities.setSystemLookAndFeel();
+            String message = String.format("A required component, \"%s\", wasn't found. Attempt to fetch it now?", binary);
+            return JOptionPane.YES_OPTION == JOptionPane.showConfirmDialog(null, message);
+        } catch (Throwable ignore) {}
+        return true;
+    }
+
+    public static void findBinary(String binary, String consequence, String debianPackage, String fedoraPackage, String archPackage) {
+        boolean installed = ShellUtilities.execute("which", binary);
+        if (!installed) {
+            if (SystemUtilities.isAdmin() && promptInstall(binary)) {
+                if(LinuxUtilities.isDebian()) {
+                    installed = ShellUtilities.execute("apt-get", "install", "-y", debianPackage);
+                } else if(LinuxUtilities.isFedora()) {
+                    installed =  ShellUtilities.execute("dnf", "install", "-y", fedoraPackage);
+                } else if(LinuxUtilities.isArch()) {
+                    installed =  ShellUtilities.execute("pacman", "-S", "--noconfirm", archPackage);
+                }
+            }
+        }
+        if(!installed) {
+            log.warn("A critical component, \"{}\" wasn't found and cannot be installed automatically. {}", binary, consequence);
+        }
     }
 
 }

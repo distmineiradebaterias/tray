@@ -34,14 +34,16 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 
 import static qz.ui.component.IconCache.Icon.*;
+import static qz.ui.ThemeUtilities.*;
 import static qz.utils.ArgValue.*;
+
+import static qz.App.*;
 
 /**
  * Manages the icons and actions associated with the TrayIcon
@@ -51,8 +53,6 @@ import static qz.utils.ArgValue.*;
 public class TrayManager {
 
     private static final Logger log = LogManager.getLogger(TrayManager.class);
-
-    private boolean headless;
 
     // The cached icons
     private final IconCache iconCache;
@@ -77,26 +77,17 @@ public class TrayManager {
     // The shortcut and startup helper
     private final ShortcutCreator shortcutCreator;
 
-    private final PropertyHelper prefs;
-
     // Action to run when reload is triggered
     private Thread reloadThread;
 
     // Actions to run if idle after startup
     private java.util.Timer idleTimer = new java.util.Timer();
 
-    public TrayManager() {
-        this(false);
-    }
-
     /**
      * Create a AutoHideJSystemTray with the specified name/text
      */
-    public TrayManager(boolean isHeadless) {
+    public TrayManager() {
         name = Constants.ABOUT_TITLE + " " + Constants.VERSION;
-
-        prefs = new PropertyHelper(FileUtilities.USER_DIR + File.separator + Constants.PREFS_FILE + ".properties");
-        prefs.remove(SECURITY_FILE_STRICT.getMatch()); // per https://github.com/qzind/tray/issues/1337
 
         // Set strict certificate mode preference
         Certificate.setTrustBuiltIn(!getPref(TRAY_STRICTMODE));
@@ -108,19 +99,17 @@ public class TrayManager {
         FileUtilities.setFileIoEnabled(getPref(SECURITY_FILE_ENABLED));
         FileUtilities.setFileIoStrict(getPref(SECURITY_FILE_STRICT));
 
-        // Headless if turned on by user or unsupported by environment
-        headless = isHeadless || getPref(HEADLESS) || GraphicsEnvironment.isHeadless();
-        if (headless) {
+        if (isHeadless()) {
             log.info("Running in headless mode");
         }
 
         // Set up the shortcut name so that the UI components can use it
         shortcutCreator = ShortcutCreator.getInstance();
 
-        SystemUtilities.setSystemLookAndFeel(headless);
-        iconCache = new IconCache();
+        SystemUtilities.setSystemLookAndFeel();
+        iconCache = IconCache.getInstance();
 
-        if (SystemUtilities.isSystemTraySupported(headless)) { // UI mode with tray
+        if (SystemUtilities.isSystemTraySupported()) { // UI mode with tray
             switch(SystemUtilities.getOs()) {
                 case WINDOWS:
                     tray = TrayType.JX.init(iconCache);
@@ -134,13 +123,7 @@ public class TrayManager {
                     tray = TrayType.MODERN.init(iconCache);
             }
 
-            // OS-specific tray icon handling
-            if (SystemTray.isSupported()) {
-                iconCache.fixTrayIcons(SystemUtilities.isDarkTaskbar());
-            }
-
-            // Iterates over all images denoted by IconCache.getTypes() and caches them
-            tray.setIcon(DANGER_ICON);
+            tray.setIcon(TRAY_LOADING);
             tray.setToolTip(name);
 
             try {
@@ -148,26 +131,26 @@ public class TrayManager {
             }
             catch(AWTException awt) {
                 log.error("Could not attach tray, forcing headless mode", awt);
-                headless = true;
+                setHeadless(true);
             }
-        } else if (!headless) { // UI mode without tray
+        } else if (!isHeadless()) { // UI mode without tray
             tray = TrayType.TASKBAR.init(exitListener, iconCache);
-            tray.setIcon(DANGER_ICON);
+            tray.setIcon(TRAY_LOADING);
             tray.setToolTip(name);
             tray.showTaskbar();
         }
 
         // TODO: Remove when fixed upstream.  See issue #393
-        if (SystemUtilities.isUnix() && !isHeadless) {
+        if (SystemUtilities.isUnix() && !isHeadless()) {
             // Update printer list in CUPS immediately (normally 2min)
             System.setProperty("sun.java2d.print.polling", "false");
         }
 
-        gatewayDialog = new GatewayDialog(headless, null,"Action Required", iconCache);
+        gatewayDialog = new GatewayDialog(isHeadless(), null,"Action Required", iconCache);
 
-        if(headless) {
-            // If headless, look for a location to forward message dialogs to
-            gatewayDialog.setEndpoint(PrefsSearch.getString(TRAY_DIALOG_ENDPOINT, prefs, App.getTrayProperties()));
+        if(isHeadless()) {
+            // If isHeadless(), look for a location to forward message dialogs to
+            gatewayDialog.setEndpoint(PrefsSearch.getString(TRAY_DIALOG_ENDPOINT, getUserPrefs(), App.getTrayProperties()));
         } else {
             componentList = new ArrayList<>();
             componentList.add(gatewayDialog.getDialog());
@@ -177,37 +160,7 @@ public class TrayManager {
             componentList.add(confirmDialog);
 
             // Detect theme changes
-            new Thread(() -> {
-                boolean darkDesktopMode = SystemUtilities.isDarkDesktop();
-                boolean darkTaskbarMode = SystemUtilities.isDarkTaskbar();
-                while(true) {
-                    try {
-                        Thread.sleep(1000);
-                        if (darkDesktopMode != SystemUtilities.isDarkDesktop(true) ||
-                                darkTaskbarMode != SystemUtilities.isDarkTaskbar(true)) {
-                            darkDesktopMode = SystemUtilities.isDarkDesktop();
-                            darkTaskbarMode = SystemUtilities.isDarkTaskbar();
-                            iconCache.fixTrayIcons(darkTaskbarMode);
-                            refreshIcon(null);
-                            SwingUtilities.invokeLater(() -> {
-                                SystemUtilities.setSystemLookAndFeel(headless);
-                                for(Component c : componentList) {
-                                    SwingUtilities.updateComponentTreeUI(c);
-                                    if (c instanceof Themeable) {
-                                        ((Themeable)c).refresh();
-                                    }
-                                    if (c instanceof JDialog) {
-                                        ((JDialog)c).pack();
-                                    } else if (c instanceof JPopupMenu) {
-                                        ((JPopupMenu)c).pack();
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    catch(InterruptedException ignore) {}
-                }
-            }).start();
+            new ThemeMonitor().startPolling(1000).onChange(this::refreshTheme);
         }
 
         if (tray != null) {
@@ -237,6 +190,25 @@ public class TrayManager {
         }
     }
 
+    public void refreshTheme() {
+        refreshIcon(null);
+        // TODO: Merge into ThemeUtilities
+        SwingUtilities.invokeLater(() -> {
+            SystemUtilities.setSystemLookAndFeel();
+            for(Component c : componentList) {
+                SwingUtilities.updateComponentTreeUI(c);
+                if (c instanceof Themeable) {
+                    ((Themeable)c).refresh();
+                }
+                if (c instanceof JDialog) {
+                    ((JDialog)c).pack();
+                } else if (c instanceof JPopupMenu) {
+                    ((JPopupMenu)c).pack();
+                }
+            }
+        });
+    }
+
     /**
      * Stand-alone invocation of TrayManager
      *
@@ -260,7 +232,7 @@ public class TrayManager {
         JMenuItem sitesItem = new JMenuItem("Site Manager...", iconCache.getIcon(SAVED_ICON));
         sitesItem.setMnemonic(KeyEvent.VK_M);
         sitesItem.addActionListener(savedListener);
-        sitesDialog = new SiteManagerDialog(sitesItem, iconCache, prefs);
+        sitesDialog = new SiteManagerDialog(sitesItem, iconCache, getUserPrefs());
         componentList.add(sitesDialog);
 
         JMenuItem diagnosticMenu = new JMenu("Diagnostic");
@@ -296,10 +268,10 @@ public class TrayManager {
         monocleItem.setToolTipText("Use monocle platform for HTML printing (restart required)");
         monocleItem.setMnemonic(KeyEvent.VK_U);
         monocleItem.setState(getPref(TRAY_MONOCLE));
-        if(!SystemUtilities.hasMonocle()) {
-            log.warn("Monocle engine was not detected");
+        if(Constants.JAVA_VERSION.getMajorVersion() <= 8) {
+            log.warn("Monocle engine is not available for this Java version");
             monocleItem.setEnabled(false);
-            monocleItem.setToolTipText("Monocle HTML engine was not detected");
+            monocleItem.setToolTipText("Monocle HTML engine is not available.");
         }
         monocleItem.addActionListener(monocleListener);
 
@@ -313,7 +285,7 @@ public class TrayManager {
         logItem.setMnemonic(KeyEvent.VK_L);
         logItem.addActionListener(logListener);
         diagnosticMenu.add(logItem);
-        logDialog = new LogDialog(logItem, iconCache, prefs);
+        logDialog = new LogDialog(logItem, iconCache, getUserPrefs());
         componentList.add(logDialog);
 
         JMenuItem zipLogs = new JMenuItem("Zip logs (to Desktop)");
@@ -387,7 +359,7 @@ public class TrayManager {
     private final ActionListener notificationsListener = new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent e) {
-            prefs.setProperty(TRAY_NOTIFICATIONS, ((JCheckBoxMenuItem)e.getSource()).getState());
+            getUserPrefs().setProperty(TRAY_NOTIFICATIONS, ((JCheckBoxMenuItem)e.getSource()).getState());
         }
     };
 
@@ -395,7 +367,7 @@ public class TrayManager {
         @Override
         public void actionPerformed(ActionEvent e) {
             JCheckBoxMenuItem j = (JCheckBoxMenuItem)e.getSource();
-            prefs.setProperty(TRAY_MONOCLE, j.getState());
+            getUserPrefs().setProperty(TRAY_MONOCLE, j.getState());
             displayWarningMessage(String.format("A restart of %s is required to ensure this feature is %sabled.",
                                                 Constants.ABOUT_TITLE, j.getState()? "en":"dis"));
         }
@@ -485,7 +457,7 @@ public class TrayManager {
     };
 
     public void exit(int returnCode) {
-        prefs.save();
+        getUserPrefs().save();
         FileUtilities.cleanup();
         System.exit(returnCode);
     }
@@ -499,11 +471,11 @@ public class TrayManager {
 
     public boolean showGatewayDialog(final String UID, final Request request, final String prompt, final Point position) {
         // No way to prompt, hope it's whitelisted
-        if (headless && gatewayDialog.getEndpoint() == null) {
+        if (isHeadless() && gatewayDialog.getEndpoint() == null) {
             return request.hasSavedCert();
         }
 
-        GatewayDialog.runSafely(headless, () -> gatewayDialog.prompt(UID, "%s wants to " + prompt, request, position));
+        GatewayDialog.runSafely(isHeadless(), () -> gatewayDialog.prompt(UID, "%s wants to " + prompt, request, position));
 
         GatewayDialog.Response response = gatewayDialog.getResponse();
         switch(response) {
@@ -521,7 +493,7 @@ public class TrayManager {
 
         if(response.alwaysBlockAnonymous(request)) {
             // Treat as "block anonymous requests" to prevent pop-up abuse
-            if(!headless) {
+            if(!isHeadless()) {
                 anonymousItem.setState(false);
                 anonymousItem.doClick();
             } else {
@@ -555,7 +527,7 @@ public class TrayManager {
 
             displayInfoMessage("Server started on port(s) " + PrintSocketServer.getPorts(server));
 
-            if (!headless) {
+            if (!isHeadless()) {
                 aboutDialog.setServer(server);
                 setDefaultIcon();
             }
@@ -576,12 +548,7 @@ public class TrayManager {
      * Thread safe method for setting the default icon
      */
     public void setDefaultIcon() {
-        // Workaround for JDK-8252015
-        if(SystemUtilities.isMac() && Constants.MASK_TRAY_SUPPORTED && !MacUtilities.jdkSupportsTemplateIcon()) {
-            setIcon(DEFAULT_ICON, () -> MacUtilities.toggleTemplateIcon(tray.tray()));
-        } else {
-            setIcon(DEFAULT_ICON);
-        }
+        setIcon(TRAY_READY);
     }
 
     /** Thread safe method for setting the error status message */
@@ -589,19 +556,14 @@ public class TrayManager {
         displayMessage(name, text, TrayIcon.MessageType.ERROR);
     }
 
-    /** Thread safe method for setting the danger icon */
+    /** Thread safe method for setting the loading icon */
     public void setDangerIcon() {
-        setIcon(DANGER_ICON);
+        setIcon(TRAY_LOADING);
     }
 
     /** Thread safe method for setting the warning status message */
     public void displayWarningMessage(String text) {
         displayMessage(name, text, TrayIcon.MessageType.WARNING);
-    }
-
-    /** Thread safe method for setting the warning icon */
-    public void setWarningIcon() {
-        setIcon(WARNING_ICON);
     }
 
     /** Thread safe method for setting the specified icon */
@@ -633,7 +595,7 @@ public class TrayManager {
      * @param level   The message type: Level.INFO, .WARN, .SEVERE
      */
     private void displayMessage(final String caption, final String text, final TrayIcon.MessageType level) {
-        if (!headless) {
+        if (!isHeadless()) {
             if (tray != null) {
                 SwingUtilities.invokeLater(() -> {
                     boolean showAllNotifications = getPref(TRAY_NOTIFICATIONS);
@@ -662,15 +624,11 @@ public class TrayManager {
         return getPref(TRAY_MONOCLE);
     }
 
-    public boolean isHeadless() {
-        return headless;
-    }
-
     /**
      * Get boolean user pref: Searching "user", "app" and <code>System.getProperty(...)</code>.
      */
-    private boolean getPref(ArgValue argValue) {
-        return PrefsSearch.getBoolean(argValue, prefs, App.getTrayProperties());
+    private static boolean getPref(ArgValue argValue) {
+        return PrefsSearch.getBoolean(argValue, getUserPrefs(), getTrayProperties()) ;
     }
 
     private void performIfIdle(int idleQualifier, ActionListener performer) {

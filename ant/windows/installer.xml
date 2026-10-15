@@ -1,5 +1,6 @@
 <project name="windows-installer" basedir="../../">
     <property file="ant/project.properties"/>
+    <property file="ant/windows/windows.properties"/>
     <import file="${basedir}/ant/version.xml"/>
     <import file="${basedir}/ant/platform-detect.xml"/>
     <import file="${basedir}/ant/signing.xml"/>
@@ -173,10 +174,13 @@
                 <include name="**/win32-x86-64/*" if="target.arch.x86_64"/> <!-- jna/hid4java -->
                 <include name="**/windows-x86_64/*" if="target.arch.x86_64"/> <!-- usb4java -->
                 <include name="**/windows_64/*" if="target.arch.x86_64"/> <!-- jssc -->
+                <include name="**/natives/*-x86_64.dll" if="target.arch.x86_64"/> <!-- flatlaf -->
                 <!--aarch64-->
-                <include name="**/win32-aarch64/*" if="target.arch.aarch64"/> <!-- jna/hid4java -->
-                <include name="**/windows-aarch64/*" if="target.arch.aarch64"/> <!-- usb4java -->
+                <include name="**/win32-aarch64/*" if="target.arch.aarch64"/> <!-- jna/hid4java, usb4java -->
                 <include name="**/windows_arm64/*" if="target.arch.aarch64"/> <!-- jssc -->
+                <include name="**/natives/*-arm64.dll" if="target.arch.aarch64"/> <!-- flatlaf -->
+                <!--all-->
+                <include name="*.dll"/> <!-- javafx -->
             </fileset>
         </copy>
     </target>
